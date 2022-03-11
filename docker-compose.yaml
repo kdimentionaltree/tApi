@@ -1,0 +1,11 @@
+version: '3.3'
+services:
+    main:
+        build:
+            context: .
+            dockerfile: deploy/main.Dockerfile
+        ports:
+          - 80:80
+        volumes:
+          - .:/app
+        command: "-m jupyter notebook . --ip=0.0.0.0 --port=80 --allow-root"

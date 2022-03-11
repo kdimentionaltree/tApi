@@ -1,0 +1,9 @@
+tvm_valuetypes
+aioprocessing
+loguru
+pyyaml
+fastapi
+pydantic
+uvicorn
+jupyter
+crc16
