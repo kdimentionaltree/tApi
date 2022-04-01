@@ -120,7 +120,6 @@ venv.bak/
 /logs
 
 .vscode
-/private
 .DS_Store
 
 /sandbox
@@ -129,7 +128,6 @@ venv.bak/
 /.vscode
 /docs
 /logs
-/private
 /sandbox
 /venv
 /notebooks

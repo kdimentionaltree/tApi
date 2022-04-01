@@ -8,6 +8,9 @@ import json
 import crc16
 import codecs
 
+from functools import wraps
+from loguru import logger
+
 
 class TonLibWrongResult(Exception):
     def __init__(self, description, result={}):
@@ -100,3 +103,30 @@ def userfriendly_to_raw(address):
 
 def str_b64encode(s):
     return base64.b64encode(s.encode('utf-8')).decode('utf-8') if s and isinstance(s, str) else None
+
+
+# repeat
+def retry_async(repeats=3, last_archval=False, raise_error=True):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            result = None
+            exception = None
+            for i in range(repeats):
+                try:
+                    kwargs_loc = kwargs.copy()
+                    if i == repeats - 1 and last_archval:
+                        logger.info('Retry with archival node')
+                        kwargs_loc['archival'] = True
+                    result = await func(*args, **kwargs_loc)
+                    exception = None
+                except Exception as ee:
+                    logger.warning(f'Retry. Attempt {i+1}')
+                    exception = ee
+            if exception is not None and raise_error:
+                raise exception
+            return result
+        #end def
+        return wrapper
+    return decorator
+                

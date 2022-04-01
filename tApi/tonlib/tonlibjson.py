@@ -25,7 +25,7 @@ def get_tonlib_path():
 
 # class TonLib for single liteserver
 class TonLib:
-    def __init__(self, loop, ls_index, cdll_path=None):
+    def __init__(self, loop, ls_index, cdll_path=None, verbose=0):
         cdll_path = get_tonlib_path() if not cdll_path else cdll_path
         tonlib = CDLL(cdll_path)
 
@@ -35,7 +35,7 @@ class TonLib:
         try:
             self._client = tonlib_json_client_create()
         except Exception:
-            asyncio.ensure_future(self.restart_hook(), loop=loop)
+            asyncio.ensure_future(self.restart(), loop=loop)
 
         tonlib_json_client_receive = tonlib.tonlib_client_json_receive
         tonlib_json_client_receive.restype = c_char_p
@@ -61,39 +61,50 @@ class TonLib:
         self.loop = loop
         self.ls_index = ls_index
         self.read_results_task = asyncio.ensure_future(self.read_results(), loop=self.loop)
-        self.del_expired_futures_task = asyncio.ensure_future(self.del_expired_futures(), loop=self.loop)
+        self.del_expired_futures_task = asyncio.ensure_future(self.del_expired_futures_loop(), loop=self.loop)
         self.shutdown_state = False  # False, "started", "finished"
         self.request_num = 0
+        self.verbose = verbose
+
         self.max_requests = None
+        self.max_restarts = None
 
     def __del__(self):
         try:
             self._tonlib_json_client_destroy(self._client)
         except Exception:
-            asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+            asyncio.ensure_future(self.restart(), loop=self.loop)
 
     def send(self, query):
         query = json.dumps(query).encode('utf-8')
         try:
             self._tonlib_json_client_send(self._client, query)
         except Exception:
-            asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+            asyncio.ensure_future(self.restart(), loop=self.loop)
+
+    async def restart(self):
+        if not self.shutdown_state:
+            self.shutdown_state = "started"
+            asyncio.ensure_future(self.restart_hook(self.max_restarts), loop=self.loop)
 
     def receive(self, timeout=10):
         result = None
         try:
             result = self._tonlib_json_client_receive(self._client, timeout)  # time.sleep # asyncio.sleep
         except Exception:
-            asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+            asyncio.ensure_future(self.restart(), loop=self.loop)
         if result:
             result = json.loads(result.decode('utf-8'))
         return result
 
-    def set_restart_hook(self, hook, max_requests=None):
+    def set_restart_hook(self, hook, max_requests=None, max_restarts=None):
         self.max_requests = max_requests
+        self.max_restarts = max_restarts
         self.restart_hook = hook
 
     def execute(self, query, timeout=10):
+        query_type = query.get('@type', '?')
+        # logger.debug(f'Tonlib #{self.ls_index:03d}. Executing query with timeout={timeout}: {query_type}')
         extra_id = "%s:%s:%s" % (time.time()+timeout, self.ls_index, random.random())
         query["@extra"] = extra_id
         
@@ -105,7 +116,8 @@ class TonLib:
         self.request_num += 1
 
         if self.max_requests and self.max_requests < self.request_num:
-            asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+            asyncio.ensure_future(self.restart(), loop=self.loop)
+
         return future_result
 
     @property
@@ -114,7 +126,7 @@ class TonLib:
 
     async def read_results(self):
         timeout = 3
-        delta = 0.5
+        delta = 5
         receive_func = functools.partial(self.receive, timeout)
 
         while not self._is_finishing:
@@ -122,11 +134,13 @@ class TonLib:
             try:
                 result = await asyncio.wait_for(self.loop.run_in_executor(None, receive_func), timeout=timeout + delta)
             except asyncio.TimeoutError:
-                logger.critical("Tonlib Stuck!")
-                asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+                logger.critical(f"Tonlib #{self.ls_index:03d} Stuck!")
+                asyncio.ensure_future(self.restart(), loop=self.loop)
+                await asyncio.sleep(2)
             except Exception as e:
-                logger.critical("Tonlib crashed!")
-                asyncio.ensure_future(self.restart_hook(), loop=self.loop)
+                logger.critical(f"Tonlib #{self.ls_index:03d} crashed!")
+                asyncio.ensure_future(self.restart(), loop=self.loop)
+                await asyncio.sleep(2)
             
             # return result
             if result and isinstance(result, dict) and ("@extra" in result) and (result["@extra"] in self.futures):
@@ -135,20 +149,20 @@ class TonLib:
                         self.futures[result["@extra"]].set_result(result)
                         self.futures.pop(result["@extra"])
                 except Exception as e:
-                    logger.error(f'Tonlib receiving result exception: {e}')
-            elif result:
-                logger.warning(f"Get strange result: {result}")
+                    logger.error(f'Tonlib #{self.ls_index:03d} receiving result exception: {e}')
         self.shutdown_state = "finished"
 
-    async def del_expired_futures(self):
+    async def del_expired_futures_loop(self):
         while not self._is_finishing:
-            now = time.time()
-            to_del = []
-            for i in self.futures:
-                if float(i.split(":")[0]) <= now:
-                    to_del.append(i)
-            for i in to_del:
-                i.cancel()
-                self.futures.pop(i)
-
+            await self.cancel_futures()
             await asyncio.sleep(1)
+
+    async def cancel_futures(self, cancel_all=False):
+        now = time.time()
+        to_del = []
+        for i in self.futures:
+            if float(i.split(":")[0]) <= now or cancel_all:
+                to_del.append(i)
+        for i in to_del:
+            i.cancel()
+            self.futures.pop(i)
