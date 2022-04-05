@@ -40,7 +40,7 @@ class TonlibClient:
     async def reconnect(self, max_restarts=None):
         if max_restarts is not None:
             max_restarts -= 1
-        if max_restarts >= 0 or max_restarts is None:
+        if max_restarts is None or max_restarts >= 0:
             await self.init(max_restarts)
             logger.info(f'Client #{self.ls_index:03d} reconnected (max_restarts: {max_restarts})')
         else:
