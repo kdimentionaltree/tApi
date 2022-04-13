@@ -3,6 +3,7 @@ import threading
 
 from tApi.tonlib import TonlibClient
 
+
 class AsyncioEventLoopThread(threading.Thread):
     def __init__(self, *args, loop=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -20,6 +21,7 @@ class AsyncioEventLoopThread(threading.Thread):
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.join()
         self.running = False
+
 
 class TonlibClientSync:
     def __init__(self,
@@ -99,4 +101,3 @@ class TonlibClientSync:
 
     async def tryLocateTxByOutcomingMessage(self, source, destination, creation_lt):
         return self.thread.run_coro(self.client_impl.tryLocateTxByOutcomingMessage(source, destination, creation_lt))
-
