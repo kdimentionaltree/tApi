@@ -339,6 +339,16 @@ class TonlibClient:
         }
         return await self.tonlib_wrapper.execute(request)
 
+    async def raw_getBlockTransactionsExt(self, fullblock, count, after_tx):
+        request = {
+            '@type': 'blocks.getTransactionsExt',
+            'id': fullblock,
+            'mode': 7 if not after_tx else 7+128,
+            'count': count,
+            'after': after_tx
+        }
+        return await self.tonlib_wrapper.execute(request)
+
     async def getTransactions(self, account_address, from_transaction_lt=None, from_transaction_hash=None, to_transaction_lt=0, limit=10, decode_messages=True):
         """
          Return all transactions between from_transaction_lt and to_transaction_lt
@@ -515,6 +525,54 @@ class TonlibClient:
             result = await self.raw_getBlockTransactions(fullblock, count, after_tx)
             if(result['@type']) == 'error':
                 result = await self.raw_getBlockTransactions(fullblock, count, after_tx)
+            if(result['@type']) == 'error':
+                raise TonLibWrongResult('Can\'t get blockTransactions', result)
+            if not total_result:
+                total_result = result
+            else:
+                total_result["transactions"] += result["transactions"]
+                total_result["incomplete"] = result["incomplete"]
+            incomplete = result["incomplete"]
+            if incomplete:
+                after_tx['account'] = result["transactions"][-1]["account"]
+                after_tx['lt'] = result["transactions"][-1]["lt"]
+
+        # TODO automatically check incompleteness and download all txes
+        for tx in total_result["transactions"]:
+            try:
+                tx["account"] = "%d:%s" % (
+                    result["id"]["workchain"], b64str_to_hex(tx["account"]))
+            except:
+                pass
+        return total_result
+
+    async def getBlockTransactionsExt(self, workchain, shard, seqno, count, root_hash=None, file_hash=None, after_lt=None, after_hash=None):
+        fullblock = {}
+        if root_hash and file_hash:
+            fullblock = {
+                '@type': 'ton.blockIdExt',
+                'workchain': workchain,
+                'shard': shard,
+                'seqno': seqno,
+                'root_hash': root_hash,
+                'file_hash': file_hash
+            }
+        else:
+            fullblock = await self.lookupBlock(workchain, shard, seqno)
+            if fullblock.get('@type', 'error') == 'error':
+                return fullblock
+        after_tx = {
+            '@type': 'blocks.accountTransactionId',
+            'account': after_hash if after_hash else 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+            'lt': after_lt if after_lt else 0
+        }
+        total_result = {}
+        incomplete = True
+
+        while incomplete:
+            result = await self.raw_getBlockTransactionsExt(fullblock, count, after_tx)
+            if(result['@type']) == 'error':
+                result = await self.raw_getBlockTransactionsExt(fullblock, count, after_tx)
             if(result['@type']) == 'error':
                 raise TonLibWrongResult('Can\'t get blockTransactions', result)
             if not total_result:
