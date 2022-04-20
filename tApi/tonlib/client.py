@@ -582,14 +582,18 @@ class TonlibClient:
                 total_result["incomplete"] = result["incomplete"]
             incomplete = result["incomplete"]
             if incomplete:
-                after_tx['account'] = result["transactions"][-1]["account"]
-                after_tx['lt'] = result["transactions"][-1]["lt"]
+                account_friendly = result["transactions"][-1]["address"]["account_address"]
+                hex_without_workchain = detect_address(account_friendly)['raw_form'].split(':')[1]
+                after = hex_to_b64str(hex_without_workchain)
+                after_tx['account'] = after
+                after_tx['lt'] = result["transactions"][-1]["transaction_id"]["lt"]
 
-        # TODO automatically check incompleteness and download all txes
         for tx in total_result["transactions"]:
             try:
+                account_friendly = tx["address"]["account_address"]
+                hex_without_workchain = detect_address(account_friendly)['raw_form'].split(':')[1]
                 tx["account"] = "%d:%s" % (
-                    result["id"]["workchain"], b64str_to_hex(tx["account"]))
+                    result["id"]["workchain"], hex_without_workchain)
             except:
                 pass
         return total_result
